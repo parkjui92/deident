@@ -1,0 +1,7 @@
+# 강제 탐지 — 자동 탐지가 놓치는 값을 여기에 적는다.
+# 형식: 값,카테고리
+# 카테고리: person org dept project_no budget confidential rrn phone email address ...
+# 예)
+# 홍길동,person
+# 미래소재연구단,org
+# 저온 플라즈마 개질 공정,confidential

@@ -1,0 +1,36 @@
+# 비식별 설정. 여기서 끈 카테고리는 탐지해도 치환하지 않는다.
+categories:
+  # 개인 식별정보
+  person: true            # 성명
+  rrn: true               # 주민등록번호
+  foreign_id: true
+  passport: true
+  driver: true
+  phone: true
+  tel: true               # 유선전화·팩스
+  email: true
+  card: true
+  account: true
+  address: true
+  birth: true
+  vehicle: true
+  # 소속·기관
+  org: true               # 기관명
+  dept: true              # 부서·조직
+  title: false            # 직위 — 본문의 '교수·연구원'까지 치우면 문서가 읽히지 않는다
+  bizno: true
+  corpno: true
+  # 사업·기술 기밀
+  project_no: true
+  budget: true
+  confidential: true
+
+# '추정' 등급도 치환할지. true 가 안전(과치환 비용 < 유출 비용).
+# 문서 훼손이 심하면 false 로 두거나 apply --strict-only 를 쓴다.
+replace_likely: true
+
+# 완전 마스킹(--mask) 때 쓰는 문자
+mask_char: "●"
+
+# 가명 서식 — {label} 은 구분 이름, {tag} 는 일련 표시
+pseudonym_format: "[{label}{tag}]"

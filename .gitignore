@@ -1,0 +1,22 @@
+# 작업 산출물·원문은 절대 올라가지 않는다
+out/
+in/
+_private/
+*.hwpx
+*.hwp
+*.docx
+*.pptx
+*.xlsx
+*.pdf
+!tests/fixtures/*.md
+
+# 사용자 사전(실제 이름·기밀어가 들어간다) — 예시만 올린다
+config/allowlist.txt
+config/denylist.txt
+config/settings.yaml
+config/confidential_rules.yaml
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
