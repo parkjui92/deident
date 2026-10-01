@@ -363,3 +363,32 @@ def test_default_policy_still_fails_on_leftovers(workspace):
     leaked.parent.mkdir(parents=True, exist_ok=True)
     leaked.write_text(f"연락처 {PLANTED['phone_pi']}", encoding="utf-8")
     assert not run_gate(leaked, mapping, config).passed
+
+
+def test_detection_does_not_depend_on_earlier_documents(tmp_path: Path):
+    """앞 문서에서 배운 이름이 뒤 문서의 탐지를 바꾸면 안 된다.
+
+    형태소 분석기는 프로세스에 하나뿐이고 사용자 사전은 덜어낼 수 없다. 그냥 쌓으면
+    같은 파일의 결과가 함께 넘긴 파일과 순서에 따라 달라진다(실측: 앞 문서의 명단에
+    있던 이름이 뒤 문서의 차트 범례에서 잡혔다).
+    """
+    from deident.detect import l3_ner
+
+    if not l3_ner.available():
+        pytest.skip("kiwipiepy 가 없다")
+
+    config = default_config(tmp_path)
+    roster = tmp_path / "명단.md"
+    roster.write_text("| 성명 | 소속 |\n|---|---|\n| 황보슬기 | 가상대학교 |\n", encoding="utf-8")
+    later = tmp_path / "범례.md"
+    later.write_text(f"| 성명 |\n|---|\n| {PLANTED['person_co']} |\n\n범례\n\n황보슬기\n",
+                     encoding="utf-8")
+
+    def spans(path: Path) -> set[tuple]:
+        result = pipeline.scan_file(path, config, Mapping())
+        return {(f.seg_id, f.start, f.end, f.category) for f in result.findings}
+
+    l3_ner._kiwi, l3_ner._kiwi_words = None, frozenset()
+    alone = spans(later)
+    spans(roster)
+    assert spans(later) == alone

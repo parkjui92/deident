@@ -25,6 +25,7 @@ from ..model import (
 
 _kiwi = None
 _kiwi_failed = False
+_kiwi_words: frozenset[str] = frozenset()   # 지금 분석기 사용자 사전에 올라 있는 이름
 
 RE_SURNAME_TITLE = re.compile(rf"(?<![가-힣])([가-힣])\s+({TITLE_ALTERNATION})(?![가-힣])")
 RE_ORG = re.compile(
@@ -40,23 +41,36 @@ RE_CITATION = re.compile(r"\([가-힣]{2,4}(?:\s*(?:외|등))?,\s*\d{4}\)")
 
 
 def _get_kiwi(registry: Registry | None):
-    """kiwipiepy 를 준비한다. 없으면 조용히 비활성 — 나머지 계층은 계속 돈다."""
-    global _kiwi, _kiwi_failed
+    """kiwipiepy 를 준비한다. 없으면 조용히 비활성 — 나머지 계층은 계속 돈다.
+
+    사용자 사전에는 **이 문서의** 이름만 올라 있어야 한다. 분석기는 프로세스에
+    하나뿐이고 사용자 사전은 덜어낼 수 없어서, 그냥 쌓으면 앞 문서에서 배운 이름이
+    뒤 문서의 탐지를 바꾼다 — 같은 파일의 결과가 함께 넘긴 파일과 순서에 따라
+    달라진다(실측). 그래서 이 문서에 없는 이름이 올라 있으면 분석기를 새로 만든다.
+    """
+    global _kiwi, _kiwi_failed, _kiwi_words
     if _kiwi_failed:
         return None
-    if _kiwi is None:
+    try:
+        from kiwipiepy import Kiwi
+    except ImportError:
+        _kiwi_failed = True
+        return None
+
+    if registry is None:          # 쓸 수 있는지만 묻는 호출 — 사전은 건드리지 않는다
+        if _kiwi is None:
+            _kiwi, _kiwi_words = Kiwi(), frozenset()
+        return _kiwi
+
+    wanted = frozenset(r.canonical for r in registry.by_category(CAT_PERSON))
+    if _kiwi is None or not _kiwi_words <= wanted:
+        _kiwi, _kiwi_words = Kiwi(), frozenset()
+    for name in sorted(wanted - _kiwi_words):
         try:
-            from kiwipiepy import Kiwi
-        except ImportError:
-            _kiwi_failed = True
-            return None
-        _kiwi = Kiwi()
-    if registry:
-        for record in registry.by_category(CAT_PERSON):
-            try:
-                _kiwi.add_user_word(record.canonical, "NNP")
-            except Exception:
-                pass
+            _kiwi.add_user_word(name, "NNP")
+        except Exception:
+            pass
+    _kiwi_words = wanted
     return _kiwi
 
 
