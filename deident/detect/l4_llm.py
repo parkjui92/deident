@@ -33,6 +33,7 @@ from urllib.parse import urlsplit
 from . import l3_ner
 
 from ..config import Config
+from ..entity import boundary
 from ..entity.registry import match_is_whole
 from ..kdata import ORG_STOPWORDS, PLACE_NAMES
 from ..errors import ConfigError, DeidentError
@@ -295,9 +296,10 @@ def _explained_everywhere(value: str, category: str, segments: list[Segment],
                           taken: dict[str, list[tuple[int, int]]]) -> bool:
     """두 글자 값이 문서 어디서든 '그 낱말'로만 쓰였는가.
 
-    게이트는 매핑에 오른 값을 글자 그대로 찾는다. '수연'을 올렸는데 문서에
-    '교수연구실'이 있으면 치환기는 그 자리를 건드리지 않고 게이트는 누출로 본다 —
-    정상 문서가 통과하지 못하게 된다. 그런 값은 올리지 않는다.
+    형태소 분석기가 없으면 게이트는 매핑에 오른 값을 글자 그대로 찾는다. '수연'을
+    올렸는데 문서에 '교수연구실'이 있으면 치환기는 그 자리를 건드리지 않고 게이트는
+    누출로 본다 — 정상 문서가 통과하지 못하게 된다. 그 환경에서는 그런 값을 올리지
+    않는다. (분석기가 있으면 양쪽이 낱말 경계로 판정한다 — entity/boundary.py)
     """
     for seg in segments:
         cursor = seg.text.find(value)
@@ -363,8 +365,9 @@ def detect(segments: list[Segment], config: Config, existing: list[Finding],
                 continue
             if category == CAT_PERSON and has_digit:
                 continue
-            if _short_hangul(value) and not _explained_everywhere(
-                    value, category, segments, taken):
+            # 형태소 분석기가 없으면 게이트가 글자 그대로 찾는다 — 그때만 가려 받는다
+            if (_short_hangul(value) and not boundary.available()
+                    and not _explained_everywhere(value, category, segments, taken)):
                 continue
             if category == CAT_ORG and (
                     value in PLACE_NAMES or value in ORG_STOPWORDS

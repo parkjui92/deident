@@ -14,21 +14,13 @@ from __future__ import annotations
 import re
 
 from ..config import Config
+from ..entity import boundary
+from ..entity.boundary import BOUNDED, LOOSE_BOUNDARY_LENGTH
 from ..entity.registry import match_is_whole
 from ..entity.pseudonym import Mapping
-from ..model import (
-    CAT_DEPT, CAT_ORG, CAT_PERSON, RE_PSEUDONYM, Replacement, Segment,
-)
+from ..model import RE_PSEUDONYM, Replacement, Segment
 
-# 낱말 경계를 따져야 하는 구분 — 짧은 한글 값이 다른 낱말에 박히는 것을 막는다
-BOUNDED = {CAT_PERSON, CAT_ORG, CAT_DEPT}
 MIN_LENGTH = 2
-
-# 이 길이 이상이면 앞뒤에 한글이 붙어 있어도 그 값으로 인정한다.
-# 슬라이드·표에서는 '발표자홍길동'처럼 띄어쓰기 없이 붙는 일이 흔해서, 경계를
-# 엄격히 따지면 이미 민감하다고 판정한 값이 그대로 남는다(실측에서 확인).
-# 더 긴 값을 먼저 처리하므로 '김민'이 '김민수' 안에서 잘리는 일은 생기지 않는다.
-LOOSE_BOUNDARY_LENGTH = 3
 
 # 벌려 쓴 표기에서 낱말 경계를 따지지 않을 최소 길이 (붙여쓴 경우보다 한 글자 더 요구)
 SPACED_LOOSE_LENGTH = 4
@@ -76,6 +68,12 @@ def sweep_text(text: str, mapping: Mapping, config: Config) -> str:
         for value in sorted([entry.original, *entry.variants], key=len, reverse=True):
             if len(value) < MIN_LENGTH or RE_PSEUDONYM.search(value):
                 continue
+            if boundary.needs_word_check(value, entry.category):
+                # 두 글자 값은 그 낱말로 쓰인 자리만 — '강산'을 지우다 '강산성'을
+                # 망가뜨리지 않는다. 게이트도 같은 기준으로 본다.
+                for start in reversed(boundary.occurrences(text, value, entry.category)):
+                    text = text[:start] + entry.pseudonym + text[start + len(value):]
+                continue
             if value in text:
                 text = text.replace(value, entry.pseudonym)
             spaced = _spaced_pattern(value)
@@ -119,7 +117,11 @@ def sweep(segments: list[Segment], mapping: Mapping, config: Config,
             if any(idx < e and s < end for s, e in pseudo_spans):
                 return
             if category in BOUNDED and (strict or len(value) < LOOSE_BOUNDARY_LENGTH):
-                if not match_is_whole(text, idx, end, category):
+                # 벌려 쓴 표기는 띄어쓰기만 본다. 붙여 쓴 자리는 낱말 경계까지 본다 —
+                # '발표자강산'은 치환하고 '강산성'은 둔다 (게이트와 같은 기준).
+                whole = (match_is_whole(text, idx, end, category) if cross
+                         else boundary.is_occurrence(text, idx, end, category))
+                if not whole:
                     return
             if not cross and not seg.slice_editable(idx, end):
                 return

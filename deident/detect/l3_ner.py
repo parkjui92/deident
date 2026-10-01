@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 
 from ..config import Config
+from ..entity import boundary
 from ..entity.registry import (
     Registry, match_is_whole, resolve_surname_title, surname_is_ambiguous,
 )
@@ -572,11 +573,13 @@ def _given_name_findings(segments: list[Segment], names: set[str], kiwi, claim,
                          skip_segments: set[str]) -> list[Finding]:
     """성명이 확인된 사람을 이름만으로 부른 자리.
 
-    두 글자 이름은 다른 낱말 속에도 들어 있다('수연' ⊂ '교수연구실'). 치환기는
-    그런 자리를 건드리지 않지만 게이트는 글자 그대로 찾기 때문에, 한 번 등록하면
-    정상 문서가 게이트를 통과하지 못한다. 그래서 문서 안의 모든 출현이 설명될
-    때만 등록한다.
+    두 글자 이름은 다른 낱말 속에도 들어 있다('수연' ⊂ '교수연구실'). 치환기와
+    게이트는 그런 자리를 낱말 경계로 가려낸다(entity/boundary.py). 다만 그 판정에는
+    형태소 분석기가 필요해서, 분석기가 없을 때는 게이트가 글자 그대로 찾는다 —
+    그 환경에서는 문서 안의 모든 출현이 설명될 때만 등록한다. 그러지 않으면 정상
+    문서가 게이트를 통과하지 못한다.
     """
+    must_explain = not boundary.available()
     out: list[Finding] = []
     for name in sorted(names):
         given = _given_of(name)
@@ -603,7 +606,7 @@ def _given_name_findings(segments: list[Segment], names: set[str], kiwi, claim,
                 elif strong.match(text, cursor) or (not common and loose.match(text, cursor)):
                     if seg.seg_id not in skip_segments and not is_header_cell(seg):
                         hits.append((seg, cursor))
-                else:
+                elif must_explain:
                     explained = False
                     break
                 cursor = text.find(given, cursor + 1)

@@ -20,7 +20,8 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..model import digits_only
+from ..entity import boundary
+from ..model import CAT_PERSON, digits_only
 
 # 텍스트로 볼 수 있는 부분만 추리기 위한 태그 제거
 RE_TAG = re.compile(r"<[^>]*>")
@@ -286,14 +287,26 @@ def _spaced_form(value: str):
     return re.compile(r"[\s·]*".join(re.escape(ch) for ch in value))
 
 
-def _prepare(originals: list[str], min_digits: int):
+def _prepare(originals: list[str], min_digits: int,
+             word_values: frozenset[str] = frozenset()):
+    # 형태소 분석기가 없으면 낱말 판정을 할 수 없다 — 그때는 전부 글자 그대로 본다
+    word_values = word_values if boundary.available() else frozenset()
     prepared = []
     for original in originals:
         forms = _normalized_forms(original)
         digits = digits_only(original)
         prepared.append((original, forms, digits if len(digits) >= min_digits else "",
-                         _spaced_form(original)))
+                         _spaced_form(original), original in word_values))
     return prepared
+
+
+def _word_hit(text: str, original: str, forms: set[str]) -> bool:
+    """두 글자 값이 '그 낱말로' 남아 있는가. 다른 낱말의 일부('강산성')는 세지 않는다."""
+    nfc = unicodedata.normalize("NFC", original)
+    if boundary.occurrences(text, nfc, CAT_PERSON):
+        return True
+    # 풀어쓴 자모(NFD)로 남은 것은 경계를 따질 수 없다 — 글자 그대로 본다
+    return any(form in text for form in forms if form != nfc)
 
 
 def _hits(text: str, prepared, use_digits: bool) -> list[str]:
@@ -305,7 +318,11 @@ def _hits(text: str, prepared, use_digits: bool) -> list[str]:
         compact = RE_SEPARATORS.sub("", text)
     digit_stream = digits_only(text) if use_digits else ""
     found = []
-    for original, forms, digits, spaced in prepared:
+    for original, forms, digits, spaced, is_word in prepared:
+        if is_word:
+            if _word_hit(text, original, forms):
+                found.append(original)
+            continue
         if any(form in text for form in forms):
             found.append(original)
         elif digits and (digits in compact or (digit_stream and digits in digit_stream)):
@@ -317,6 +334,7 @@ def _hits(text: str, prepared, use_digits: bool) -> list[str]:
 
 def find_leaks(path: Path, originals: list[str], min_digits: int = 7,
                segment_texts: list[tuple[str, str]] | None = None,
+               word_values: frozenset[str] = frozenset(),
                ) -> list[tuple[str, str]]:
     """(원값, 발견된 부분 이름) 목록. 비어 있으면 잔여 없음.
 
@@ -328,11 +346,14 @@ def find_leaks(path: Path, originals: list[str], min_digits: int = 7,
 
     조각을 넘어선 이어 붙이기는 하지 않는다. 서로 다른 칸의 글자가 붙어 원문에
     없는 문자열을 만들어 내면 정상 문서가 통과하지 못한다.
+
+    word_values 는 낱말 경계를 따질 값(두 글자 인명·기관)이다. 이 값들은 치환기와
+    같은 기준으로 '그 낱말로 쓰인 자리'만 누출로 센다 (entity/boundary.py).
     """
     if not originals:
         return []
 
-    prepared = _prepare(originals, min_digits)
+    prepared = _prepare(originals, min_digits, word_values)
     leaks: list[tuple[str, str]] = []
 
     for part in iter_parts(path):
