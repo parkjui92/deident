@@ -16,7 +16,12 @@ from typing import Any
 
 # 이미 치환된 가명의 모양. 재실행이 자기 산출물을 다시 갉아먹지 않도록
 # 탐지·수확 양쪽에서 이 구간을 건너뛴다 (멱등성의 근거).
-RE_PSEUDONYM = re.compile(r"\[[가-힣A-Za-z]+[A-Z]*\d*(?:-[가-힣A-Za-z]+\d*)?\]")
+# 가명에는 반드시 일련 표시(A·B… 또는 1·2…)가 붙는다. 표시 없는 '[예지]'까지
+# 가명으로 보면 메신저 내보내기의 대화명('[홍길동] [오전 9:14] …')을 영영 치환하지
+# 못한다 — 다른 자리에서 같은 이름이 잡히면 게이트가 통과하지 못하고, 안 잡히면
+# 조용히 남는다(검증용 문서에서 확인).
+RE_PSEUDONYM = re.compile(
+    r"\[[가-힣A-Za-z]+?(?:[A-Z]+|\d+)(?:-[가-힣A-Za-z]+\d*)?\]")
 
 # ── 카테고리 ────────────────────────────────────────────────────────────────
 # 개인 식별정보
@@ -33,6 +38,7 @@ CAT_ACCOUNT = "account"
 CAT_ADDRESS = "address"
 CAT_BIRTH = "birth"
 CAT_VEHICLE = "vehicle"
+CAT_HANDLE = "handle"            # 메신저·서비스 계정
 # 소속·기관
 CAT_ORG = "org"
 CAT_DEPT = "dept"
@@ -47,7 +53,7 @@ CAT_CONFIDENTIAL = "confidential"
 PERSONAL_CATEGORIES = frozenset({
     CAT_PERSON, CAT_RRN, CAT_FOREIGN_ID, CAT_PASSPORT, CAT_DRIVER,
     CAT_PHONE, CAT_TEL, CAT_EMAIL, CAT_CARD, CAT_ACCOUNT,
-    CAT_ADDRESS, CAT_BIRTH, CAT_VEHICLE,
+    CAT_ADDRESS, CAT_BIRTH, CAT_VEHICLE, CAT_HANDLE,
 })
 ORG_CATEGORIES = frozenset({CAT_ORG, CAT_DEPT, CAT_TITLE, CAT_BIZNO, CAT_CORPNO})
 CONFIDENTIAL_CATEGORIES = frozenset({CAT_PROJECT_NO, CAT_BUDGET, CAT_CONFIDENTIAL})
@@ -58,7 +64,7 @@ CATEGORY_LABEL = {
     CAT_PASSPORT: "여권번호", CAT_DRIVER: "운전면허번호", CAT_PHONE: "휴대전화",
     CAT_TEL: "유선전화", CAT_EMAIL: "이메일", CAT_CARD: "카드번호",
     CAT_ACCOUNT: "계좌번호", CAT_ADDRESS: "주소", CAT_BIRTH: "생년월일",
-    CAT_VEHICLE: "차량번호", CAT_ORG: "기관", CAT_DEPT: "부서",
+    CAT_VEHICLE: "차량번호", CAT_HANDLE: "계정", CAT_ORG: "기관", CAT_DEPT: "부서",
     CAT_TITLE: "직위", CAT_BIZNO: "사업자등록번호", CAT_CORPNO: "법인등록번호",
     CAT_PROJECT_NO: "과제번호", CAT_BUDGET: "예산", CAT_CONFIDENTIAL: "기밀",
 }
