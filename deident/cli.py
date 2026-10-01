@@ -13,6 +13,7 @@ from pathlib import Path
 from . import formats  # noqa: F401  (핸들러 등록 부수효과)
 from . import guard, pipeline, selftest
 from .config import Config, load_config
+from .detect import l4_llm
 from .entity.pseudonym import Mapping
 from .errors import DeidentError, install_excepthook
 from .report import html_report
@@ -52,13 +53,25 @@ def _load_mapping(config: Config) -> Mapping:
                         fmt=str(config.settings.get("pseudonym_format", "[{label}{tag}]")))
 
 
+def _llm_settings(args: argparse.Namespace, config: Config):
+    """--llm 을 달았을 때만 로컬 LLM 설정을 만든다. 쓸 수 없으면 여기서 멈춘다."""
+    if not getattr(args, "llm", False):
+        return None
+    settings = l4_llm.LLMSettings.from_config(
+        config, model=getattr(args, "llm_model", None),
+        replace_orgs=getattr(args, "llm_orgs", False))
+    l4_llm.preflight(settings)
+    return settings
+
+
 def cmd_scan(args: argparse.Namespace, config: Config) -> int:
     mapping = _load_mapping(config)
     config.workspace.prepare()
+    llm = _llm_settings(args, config)
     exit_code = EXIT_OK
     for path in _collect_inputs(args.inputs, config):
-        result = pipeline.scan_file(path, config, mapping)
-        data = build_summary(path, result.findings, [], None, "scan")
+        result = pipeline.scan_file(path, config, mapping, llm=llm)
+        data = build_summary(path, result.findings, [], None, "scan", result.issues)
         print(render_text(data))
         write_summary(config.workspace.out / f"{path.stem}.summary.json", data)
         html_report.write_reports(result, config, mapping)
@@ -67,14 +80,16 @@ def cmd_scan(args: argparse.Namespace, config: Config) -> int:
 
 def cmd_apply(args: argparse.Namespace, config: Config) -> int:
     mapping = _load_mapping(config)
+    llm = _llm_settings(args, config)
     exit_code = EXIT_OK
     for path in _collect_inputs(args.inputs, config):
         result = pipeline.apply_file(
             path, config, mapping,
             strict_only=args.strict_only, mask_mode=args.mask,
-            emit_markdown=not args.no_markdown,
+            emit_markdown=not args.no_markdown, llm=llm,
         )
-        data = build_summary(path, result.findings, result.outputs, result.gate, "apply")
+        data = build_summary(path, result.findings, result.outputs, result.gate, "apply",
+                             result.issues)
         print(render_text(data))
         write_summary(config.workspace.out / f"{path.stem}.summary.json", data)
         html_report.write_reports(result, config, mapping)
@@ -132,8 +147,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_guard.add_argument("--json", action="store_true", help="기계 판독용 JSON")
     p_guard.set_defaults(func=cmd_guard)
 
+    def add_llm_options(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--llm", action="store_true",
+                       help="이 컴퓨터의 LLM(ollama)으로 규칙이 놓친 후보를 더 찾는다 "
+                            "(느림: 1,000자에 10~30초)")
+        p.add_argument("--llm-model", default=None, metavar="이름",
+                       help="쓸 모델 (기본: settings.yaml 의 llm.model, 없으면 gemma3:12b)")
+        p.add_argument("--llm-orgs", action="store_true",
+                       help="LLM이 찾은 기관도 치환한다 (기본은 '검토' 등급으로 표시만)")
+
     p_scan = sub.add_parser("scan", help="탐지만 수행 (파일 변경 없음)")
     p_scan.add_argument("inputs", nargs="*", default=[])
+    add_llm_options(p_scan)
     p_scan.set_defaults(func=cmd_scan)
 
     p_apply = sub.add_parser("apply", help="탐지→치환→검증 게이트→리포트")
@@ -144,6 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
                          help="가명 대신 완전 마스킹 (복원 불가)")
     p_apply.add_argument("--no-markdown", action="store_true",
                          help="AI용 .md 산출 생략")
+    add_llm_options(p_apply)
     p_apply.set_defaults(func=cmd_apply)
 
     p_verify = sub.add_parser("verify", help="산출물을 단독으로 재검증")

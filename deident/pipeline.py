@@ -14,7 +14,7 @@ from typing import Callable, Protocol
 from .apply.planner import apply_to_text, group_by_segment, plan_replacements
 from .apply.sweep import sweep, sweep_text
 from .config import Config
-from .detect import l1_patterns, l2_structure, l3_ner, merge, rules
+from .detect import l1_patterns, l2_structure, l3_ner, l4_llm, merge, rules
 from .entity.pseudonym import Mapping
 from .errors import UnsupportedFormat
 from .model import KIND_HIDDEN, DocumentIssue, Finding, Replacement, Segment
@@ -97,6 +97,8 @@ class RunResult:
     issues: list[DocumentIssue] = field(default_factory=list)
 
     blocked: bool = False
+    # 로컬 LLM이 짚은 식별 서술 (원문) — 비공개 리포트에만 싣는다
+    llm_quasi: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -105,11 +107,29 @@ class RunResult:
         return self.gate is None or self.gate.passed
 
 
-def scan_file(path: Path, config: Config, mapping: Mapping) -> RunResult:
+def _with_llm(result: RunResult, config: Config,
+              llm: "l4_llm.LLMSettings | None") -> None:
+    """선택 기능 — 규칙이 잡은 것에 로컬 LLM 후보를 보탠다.
+
+    여기서만 부른다. 검증 게이트의 재스캔은 detect() 를 거치므로 LLM을 쓰지 않는다.
+    """
+    if llm is None:
+        return
+    outcome = l4_llm.detect(result.segments, config, result.findings, llm)
+    result.findings = sorted(result.findings + outcome.findings,
+                             key=lambda f: (f.part, f.seg_id, f.start))
+    result.issues.extend(outcome.issues)
+    result.llm_quasi = list(outcome.quasi or [])
+
+
+def scan_file(path: Path, config: Config, mapping: Mapping,
+              llm: "l4_llm.LLMSettings | None" = None) -> RunResult:
     handler = handler_for(path)
     segments = handler.extract(path)
     findings = detect(segments, config, mapping)
-    return RunResult(source=path, segments=segments, findings=findings)
+    result = RunResult(source=path, segments=segments, findings=findings)
+    _with_llm(result, config, llm)
+    return result
 
 
 def _markdown_output(handler: FormatHandler, path: Path, segments: list[Segment],
@@ -174,7 +194,8 @@ def _call_apply(handler: FormatHandler, path: Path, out_path: Path,
 
 def apply_file(path: Path, config: Config, mapping: Mapping, *,
                strict_only: bool = False, mask_mode: bool = False,
-               emit_markdown: bool = True) -> RunResult:
+               emit_markdown: bool = True,
+               llm: "l4_llm.LLMSettings | None" = None) -> RunResult:
     """탐지 → 치환 → 위생 → 게이트. 게이트 통과분만 out/ 에 남는다."""
     ws = config.workspace
     ws.prepare()
@@ -182,6 +203,9 @@ def apply_file(path: Path, config: Config, mapping: Mapping, *,
     handler = handler_for(path)
     segments = handler.extract(path)
     findings = detect(segments, config, mapping)
+    result = RunResult(source=path, segments=segments, findings=findings)
+    _with_llm(result, config, llm)
+    findings = result.findings
 
     seg_index = {s.seg_id: s for s in segments}
     plans = plan_replacements(findings, seg_index, mapping, config,
@@ -191,7 +215,6 @@ def apply_file(path: Path, config: Config, mapping: Mapping, *,
         plans.extend(sweep(segments, mapping, config, plans))
     grouped = group_by_segment(plans)
 
-    result = RunResult(source=path, segments=segments, findings=findings)
     staged: list[Path] = []
 
     # 안전을 보장할 수 없는 문서(변경 추적이 켜진 워드 등)는 여기서 멈춘다.
