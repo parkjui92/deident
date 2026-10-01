@@ -12,52 +12,14 @@ import io
 import zipfile
 from pathlib import Path
 
-from lxml import etree
-
+from ..extract import embedded, hidden
 from ..extract import xlsx_ as xlsx_extract
-from ..model import KIND_CELL, DocumentIssue, Piece, Replacement, Segment, TableCtx
+from ..model import (
+    KIND_CELL, KIND_HIDDEN, DocumentIssue, Piece, Replacement, Segment, TableCtx,
+)
+from . import ooxml
 from .planner import apply_to_text
 from .xml_apply import apply_to_segments
-
-# 작성자·회사가 남는 메타데이터
-META_MEMBERS = ("docProps/core.xml", "docProps/app.xml", "docProps/custom.xml")
-
-
-def _rewrite_zip(source: Path, target: Path, replaced: dict[str, bytes],
-                 drop: set[str] = frozenset()) -> None:
-    with zipfile.ZipFile(source) as src, zipfile.ZipFile(
-            target, "w", zipfile.ZIP_DEFLATED) as dst:
-        for info in src.infolist():
-            if info.filename in drop:
-                continue
-            data = replaced.get(info.filename)
-            if data is None:
-                data = src.read(info)
-            new_info = zipfile.ZipInfo(info.filename, date_time=info.date_time)
-            new_info.compress_type = info.compress_type
-            new_info.external_attr = info.external_attr
-            dst.writestr(new_info, data)
-
-
-def _clean_metadata(source: Path) -> dict[str, bytes]:
-    """작성자·회사 정보를 비운다. 문서 정보 창에 이름이 남는 통로다."""
-    cleaned: dict[str, bytes] = {}
-    strip_tags = {"creator", "lastModifiedBy", "Manager", "Company", "cp:lastModifiedBy"}
-    with zipfile.ZipFile(source) as zf:
-        for member in META_MEMBERS:
-            if member not in zf.namelist():
-                continue
-            root = etree.fromstring(zf.read(member))
-            changed = False
-            for node in root.iter():
-                tag = etree.QName(node).localname
-                if tag in strip_tags and (node.text or "").strip():
-                    node.text = ""
-                    changed = True
-            if changed:
-                cleaned[member] = etree.tostring(root, xml_declaration=True,
-                                                 encoding="UTF-8", standalone=True)
-    return cleaned
 
 
 class XlsxHandler:
@@ -73,8 +35,8 @@ class XlsxHandler:
         rows: dict[tuple[str, int], dict[int, str]] = {}
         for seg in segments:
             ctx = seg.table_ctx
-            if ctx is None:
-                continue
+            if ctx is None or seg.kind == KIND_HIDDEN:
+                continue      # 포함 문서의 표는 이 문서의 시트가 아니다
             text = seg.text
             seg_plans = plans.get(seg.seg_id)
             if seg_plans:
@@ -94,22 +56,27 @@ class XlsxHandler:
 
     def apply(self, path: Path, out_path: Path,
               plans: dict[str, list[Replacement]],
-              segments: list[Segment]) -> list[DocumentIssue]:
+              segments: list[Segment], mapping=None) -> list[DocumentIssue]:
         # 세그먼트가 든 노드는 다른 트리일 수 있으니 여기서 다시 파싱한다
-        trees, fresh = xlsx_extract.parse(path)
-        apply_to_segments(fresh, plans)
+        trees, fresh, always = xlsx_extract.parse(path)
+        _, touched = apply_to_segments(fresh, plans)
+        xlsx_extract.settle_numeric_cells(fresh)
 
-        replaced = {name: etree.tostring(tree, xml_declaration=True,
-                                         encoding=tree.docinfo.encoding or "UTF-8",
-                                         standalone=tree.docinfo.standalone)
-                    for name, tree in trees.items()}
-        replaced.update(_clean_metadata(path))
-        _rewrite_zip(path, out_path, replaced)
-        return [DocumentIssue(
+        with zipfile.ZipFile(path) as zf:
+            dirty = always | hidden.touched_parts(fresh, touched)
+            dirty |= ooxml.clear_identity(zf, trees)
+            replaced = {name: ooxml.serialize(tree) for name, tree in trees.items()
+                        if name in dirty}
+            inner, issues = embedded.apply(zf, plans, mapping)
+            replaced.update(inner)
+
+        ooxml.rewrite_zip(path, out_path, replaced)
+        issues.append(DocumentIssue(
             level="info", code="xlsx-shared-strings",
             message="같은 글자를 쓰는 셀은 함께 바뀝니다(엑셀이 문자열을 한 벌만 "
                     "저장하기 때문). 값이 같으면 가명도 같으므로 결과는 동일합니다.",
-            where=path.name)]
+            where=path.name))
+        return issues
 
 
 class CsvHandler:

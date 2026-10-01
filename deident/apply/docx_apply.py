@@ -23,9 +23,11 @@ from lxml import etree
 
 from ..entity.pseudonym import Mapping
 from ..extract import docx_ as docx_extract
+from ..extract import embedded
 from ..extract.docx_ import FALLBACK_MARK, W_RPR, W_T, qn
 from ..model import (
-    KIND_FOOTER, KIND_FOOTNOTE, KIND_HEADER, DocumentIssue, Replacement, Segment,
+    KIND_FOOTER, KIND_FOOTNOTE, KIND_HEADER, KIND_HIDDEN, DocumentIssue, Replacement,
+    Segment,
 )
 from .planner import apply_to_text
 from .sweep import sweep_attributes
@@ -172,11 +174,7 @@ def _drop_targets(names: set[str]) -> tuple[set[str], list[str]]:
     return dropped, reasons
 
 
-def _rewrite_content_types(zf: zipfile.ZipFile, dropped: set[str]) -> bytes | None:
-    name = "[Content_Types].xml"
-    tree = docx_extract.parse_member(zf, name)
-    if tree is None:
-        return None
+def _rewrite_content_types(tree: etree._ElementTree, dropped: set[str]) -> bool:
     root = tree.getroot()
     changed = False
     for override in list(root):
@@ -186,14 +184,11 @@ def _rewrite_content_types(zf: zipfile.ZipFile, dropped: set[str]) -> bytes | No
         if part in dropped:
             _remove(override)
             changed = True
-    return _serialize(tree) if changed else None
+    return changed
 
 
-def _rewrite_rels(zf: zipfile.ZipFile, name: str, dropped: set[str],
-                  pairs: list[tuple[str, str]]) -> bytes | None:
-    tree = docx_extract.parse_member(zf, name)
-    if tree is None:
-        return None
+def _rewrite_rels(tree: etree._ElementTree, name: str, dropped: set[str],
+                  pairs: list[tuple[str, str]]) -> bool:
     root = tree.getroot()
     base = posixpath.dirname(posixpath.dirname(name))
     changed = False
@@ -215,13 +210,10 @@ def _rewrite_rels(zf: zipfile.ZipFile, name: str, dropped: set[str],
         if resolved in dropped:
             _remove(rel)
             changed = True
-    return _serialize(tree) if changed else None
+    return changed
 
 
-def _scrub_core(zf: zipfile.ZipFile, pairs: list[tuple[str, str]]) -> bytes | None:
-    tree = docx_extract.parse_member(zf, "docProps/core.xml")
-    if tree is None:
-        return None
+def _scrub_core(tree: etree._ElementTree, pairs: list[tuple[str, str]]) -> bool:
     root = tree.getroot()
     changed = False
     for element in list(root):
@@ -243,13 +235,10 @@ def _scrub_core(zf: zipfile.ZipFile, pairs: list[tuple[str, str]]) -> bytes | No
             if new != element.text:
                 element.text = new
                 changed = True
-    return _serialize(tree) if changed else None
+    return changed
 
 
-def _scrub_app(zf: zipfile.ZipFile, pairs: list[tuple[str, str]]) -> bytes | None:
-    tree = docx_extract.parse_member(zf, "docProps/app.xml")
-    if tree is None:
-        return None
+def _scrub_app(tree: etree._ElementTree, pairs: list[tuple[str, str]]) -> bool:
     root = tree.getroot()
     changed = False
     for element in root.iter():
@@ -266,20 +255,17 @@ def _scrub_app(zf: zipfile.ZipFile, pairs: list[tuple[str, str]]) -> bytes | Non
             if new != element.text:
                 element.text = new
                 changed = True
-    return _serialize(tree) if changed else None
+    return changed
 
 
-def _scrub_settings(zf: zipfile.ZipFile) -> bytes | None:
-    tree = docx_extract.parse_member(zf, "word/settings.xml")
-    if tree is None:
-        return None
+def _scrub_settings(tree: etree._ElementTree) -> bool:
     root = tree.getroot()
     changed = False
     for tag in (W_RSIDS, W_DOC_PROTECTION, W_WRITE_PROTECTION, W_ATTACHED_TEMPLATE):
         for element in list(root.iter(tag)):
             _remove(element)
             changed = True
-    return _serialize(tree) if changed else None
+    return changed
 
 
 # ── 재포장 ──────────────────────────────────────────────────────────────────
@@ -341,6 +327,8 @@ class DocxHandler:
             row_cells, row_key, row_col = [], None, None
 
         for seg in segments:
+            if seg.kind == KIND_HIDDEN:
+                continue      # 속성·문서 속성·차트 데이터는 읽을 본문이 아니다
             if seg.part.endswith(FALLBACK_MARK):
                 continue      # 글상자는 두 벌이지만 읽는 사람에게는 한 벌이면 된다
             if seg.part != current_part:
@@ -413,25 +401,33 @@ class DocxHandler:
 
             pairs = _value_pairs(plans, mapping)
             dropped, reasons = _drop_targets(names)
+            by_name = {part.name: part for part in parts}
             modified: dict[str, bytes] = {
                 part.name: part.serialize() for part in parts if part.dirty
             }
 
-            for member, data in (
-                ("[Content_Types].xml", _rewrite_content_types(zf, dropped)),
-                ("docProps/core.xml", _scrub_core(zf, pairs)),
-                ("docProps/app.xml", _scrub_app(zf, pairs)),
-                ("word/settings.xml", _scrub_settings(zf)),
-            ):
-                if data is not None and member not in dropped:
-                    modified[member] = data
+            def scrub(member: str, fix, *args) -> None:
+                """곁가지 멤버를 손질한다. 이미 치환이 들어간 트리가 있으면 그 위에서
+                한다 — 원본을 다시 읽어 덮어쓰면 방금 지운 값이 되살아난다."""
+                if member not in names or member in dropped:
+                    return
+                part = by_name.get(member)
+                tree = part.tree if part is not None else docx_extract.parse_member(zf, member)
+                if tree is None:
+                    return
+                if fix(tree, *args) or member in modified:
+                    modified[member] = _serialize(tree)
 
+            scrub("[Content_Types].xml", _rewrite_content_types, dropped)
+            scrub("docProps/core.xml", _scrub_core, pairs)
+            scrub("docProps/app.xml", _scrub_app, pairs)
+            scrub("word/settings.xml", _scrub_settings)
             for member in sorted(n for n in names if n.endswith(".rels")):
-                if member in dropped:
-                    continue
-                data = _rewrite_rels(zf, member, dropped, pairs)
-                if data is not None:
-                    modified[member] = data
+                scrub(member, _rewrite_rels, member, dropped, pairs)
+
+            inner, inner_issues = embedded.apply(zf, plans, mapping)
+            modified.update(inner)
+            issues.extend(inner_issues)
 
             if reasons:
                 issues.append(DocumentIssue(
@@ -439,14 +435,14 @@ class DocxHandler:
                     message="제거한 멤버: " + ", ".join(sorted(dropped)),
                     where=", ".join(reasons),
                 ))
-            embedded = sorted(n for n in names
-                              if n.startswith(("word/embeddings/", "word/charts/")))
-            if embedded:
+            opaque = sorted(n for n in names if n.startswith("word/embeddings/")
+                            and n not in inner)
+            if opaque:
                 issues.append(DocumentIssue(
                     level="warn", code="embedded",
-                    message="포함 개체·차트 내부는 검사하지 못했습니다. 원본에서 "
-                            "직접 확인하십시오.",
-                    where=f"{len(embedded)}개",
+                    message="열 수 없는 포함 개체(OLE 등)는 내부를 검사하지 못했습니다. "
+                            "원본에서 직접 확인하십시오.",
+                    where=f"{len(opaque)}개",
                 ))
             media = sorted(n for n in names if n.startswith("word/media/"))
             if media:

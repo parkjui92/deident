@@ -17,7 +17,7 @@ from .config import Config
 from .detect import l1_patterns, l2_structure, l3_ner, merge, rules
 from .entity.pseudonym import Mapping
 from .errors import UnsupportedFormat
-from .model import DocumentIssue, Finding, Replacement, Segment
+from .model import KIND_HIDDEN, DocumentIssue, Finding, Replacement, Segment
 from .verify import context_risk
 from .verify.gate import GateResult, run_gate
 
@@ -135,6 +135,8 @@ def _markdown_output(handler: FormatHandler, path: Path, segments: list[Segment]
         row_key = None
 
     for seg in segments:
+        if seg.kind == KIND_HIDDEN:
+            continue      # 속성·문서 속성 같은 숨은 자리는 읽을 본문이 아니다
         text = seg.text
         seg_plans = plans.get(seg.seg_id)
         if seg_plans:

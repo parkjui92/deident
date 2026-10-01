@@ -77,6 +77,7 @@ KIND_TEXTBOX = "textbox"
 KIND_CAPTION = "caption"
 KIND_META = "meta"          # 메타데이터(작성자 등) — 치환 아닌 소거 대상
 KIND_LINE = "line"          # 평문·마크다운 한 줄
+KIND_HIDDEN = "hidden"      # 화면에 안 보이는 자리 (XML 속성·메모·차트·문서 속성 등)
 
 
 @dataclass
