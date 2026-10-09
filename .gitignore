@@ -2,6 +2,7 @@
 out/
 in/
 _private/
+intro-work/
 *.hwpx
 *.hwp
 *.docx

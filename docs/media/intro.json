@@ -1,0 +1,54 @@
+{
+  "repo": "deident",
+  "category": "문서 비식별화",
+  "color": "#8760B4",
+  "kind": "privacy",
+  "hook": [
+    "문서를 공유하기 전,",
+    "민감정보부터 살핍니다."
+  ],
+  "tagline": "로컬에서 탐지·가명화·재검사",
+  "scenario": "연구계획서·명단 등 문서를 공유하기 전에 탐지 가능한 민감정보를 처리할 때",
+  "inputs": [
+    "처리할 로컬 문서",
+    "예외·강제탐지 사전"
+  ],
+  "prompt": "guard로 먼저 위험을 확인하고,\nscan으로 탐지 결과를 살핀 뒤\napply로 비식별본을 만듭니다.",
+  "steps": [
+    "guard 점검",
+    "scan 탐지",
+    "apply 치환",
+    "검증·격리"
+  ],
+  "result": "게이트 통과 산출물 + 마스킹 리포트",
+  "feature_title": "탐지·치환은 로컬 코드로",
+  "features": [
+    [
+      "같은 값, 같은 가명",
+      "문서 안의 동일 인물을 일관되게"
+    ],
+    [
+      "원값 매핑 분리",
+      "민감한 매핑은 _private/에 보관"
+    ],
+    [
+      "불합격 결과 격리",
+      "검증 게이트 통과분만 out/으로"
+    ]
+  ],
+  "note": "탐지 누락·이미지 속 글자·문맥 재식별은 남을 수 있습니다. 사람의 확인이 필요합니다.",
+  "output": [
+    "홍길동 교수  →  [연구자A] 교수",
+    "_private/  원값 매핑",
+    "out/  게이트 통과분"
+  ],
+  "cta": "샘플 문서에 guard부터 실행하세요",
+  "start": "python3 run.py guard \"문서.hwpx\"",
+  "start_short": "guard → scan → apply → verify",
+  "sources": [
+    "run.py",
+    "deident/cli.py",
+    "README.md"
+  ],
+  "source_commit": "1cbdeb4cdd0af9eebf16bd0982eb24d2290bdcff"
+}
