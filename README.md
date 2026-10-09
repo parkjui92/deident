@@ -10,8 +10,6 @@
 
 [![로컬 문서를 점검하고 동일한 이름을 동일한 가명으로 치환한 뒤 검증하는 흐름](docs/media/intro-preview.gif)](docs/media/intro.mp4)
 
-[30초 영상 보기](docs/media/intro.mp4) · [정지 이미지](docs/media/intro-poster.png) · [영상 내용과 근거](docs/media/README.md) · [로고 기반 디자인 기준](DESIGN.md)
-
 *소리 없이 볼 수 있는 한국어 모션그래픽입니다. 가상 자료로 구성한 사용 흐름이며 실제 UI 녹화는 아닙니다.*
 
 ## 이런 업무에 이렇게 씁니다
