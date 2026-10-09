@@ -1,7 +1,7 @@
 {
   "repo": "deident",
   "category": "문서 비식별화",
-  "color": "#8760B4",
+  "color": "#0071BC",
   "kind": "privacy",
   "hook": [
     "문서를 공유하기 전,",
@@ -50,5 +50,6 @@
     "deident/cli.py",
     "README.md"
   ],
-  "source_commit": "1cbdeb4cdd0af9eebf16bd0982eb24d2290bdcff"
+  "source_commit": "1cbdeb4cdd0af9eebf16bd0982eb24d2290bdcff",
+  "brand": "정책한걸음"
 }
