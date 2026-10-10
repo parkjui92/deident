@@ -1,55 +1,251 @@
 {
-  "repo": "deident",
-  "category": "문서 비식별화",
-  "color": "#0071BC",
-  "kind": "privacy",
-  "hook": [
-    "문서를 공유하기 전,",
-    "민감정보부터 살핍니다."
-  ],
-  "tagline": "로컬에서 탐지·가명화·재검사",
-  "scenario": "연구계획서·명단 등 문서를 공유하기 전에 탐지 가능한 민감정보를 처리할 때",
-  "inputs": [
-    "처리할 로컬 문서",
-    "예외·강제탐지 사전"
-  ],
-  "prompt": "guard로 먼저 위험을 확인하고,\nscan으로 탐지 결과를 살핀 뒤\napply로 비식별본을 만듭니다.",
-  "steps": [
-    "guard 점검",
-    "scan 탐지",
-    "apply 치환",
-    "검증·격리"
-  ],
-  "result": "게이트 통과 산출물 + 마스킹 리포트",
-  "feature_title": "탐지·치환은 로컬 코드로",
-  "features": [
-    [
-      "같은 값, 같은 가명",
-      "문서 안의 동일 인물을 일관되게"
-    ],
-    [
-      "원값 매핑 분리",
-      "민감한 매핑은 _private/에 보관"
-    ],
-    [
-      "불합격 결과 격리",
-      "검증 게이트 통과분만 out/으로"
-    ]
-  ],
-  "note": "탐지 누락·이미지 속 글자·문맥 재식별은 남을 수 있습니다. 사람의 확인이 필요합니다.",
-  "output": [
-    "홍길동 교수  →  [연구자A] 교수",
-    "_private/  원값 매핑",
-    "out/  게이트 통과분"
-  ],
-  "cta": "샘플 문서에 guard부터 실행하세요",
-  "start": "python3 run.py guard \"문서.hwpx\"",
-  "start_short": "guard → scan → apply → verify",
+  "category": "문서 민감정보 비식별화",
+  "provenance": "가상 문서 실제 실행 결과 · 터미널 재생",
   "sources": [
-    "run.py",
     "deident/cli.py",
-    "README.md"
+    "deident/report/summary.py",
+    "examples/intro-demo.md",
+    "docs/media/demo-run.json"
   ],
-  "source_commit": "1cbdeb4cdd0af9eebf16bd0982eb24d2290bdcff",
-  "brand": "정책한걸음"
+  "scenes": [
+    {
+      "title": "공유할 문서에서 이름·기관을 먼저 찾습니다",
+      "caption": "이 예제는 가상 이름·기관을 사전에 등록하고 실행했습니다.",
+      "panels": [
+        {
+          "title": "Terminal · deident 저장소",
+          "kind": "terminal",
+          "lines": [
+            {
+              "text": "$ python3 run.py --root intro-work scan",
+              "style": "command"
+            },
+            {
+              "text": "",
+              "style": "text"
+            },
+            {
+              "text": "■ intro-demo.md — scan",
+              "style": "text"
+            },
+            {
+              "text": "  탐지 3건",
+              "style": "accent"
+            },
+            {
+              "text": "   - 기관: 확실 1 / 추정 0  예: 미******",
+              "style": "text"
+            },
+            {
+              "text": "   - 성명: 확실 2 / 추정 0  예: 홍*동",
+              "style": "text"
+            },
+            {
+              "text": "",
+              "style": "text"
+            },
+            {
+              "text": "※ scan은 원본 문서를 바꾸지 않습니다.",
+              "style": "muted"
+            }
+          ]
+        },
+        {
+          "title": "intro-work/in/intro-demo.md",
+          "kind": "file",
+          "lines": [
+            {
+              "text": "# 소개용 가상 문서",
+              "style": "heading"
+            },
+            {
+              "text": "",
+              "style": "text"
+            },
+            {
+              "text": "연구책임자: 홍길동 교수",
+              "style": "highlight"
+            },
+            {
+              "text": "소속: 미래정책연구원",
+              "style": "highlight"
+            },
+            {
+              "text": "",
+              "style": "text"
+            },
+            {
+              "text": "홍길동 교수가 검토함.",
+              "style": "text"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "apply를 실행하면 치환 후 재검사합니다",
+      "caption": "이 실행에서는 탐지 3건을 처리하고 검증 게이트를 통과했습니다.",
+      "panels": [
+        {
+          "title": "Terminal · 실제 stdout",
+          "kind": "terminal",
+          "lines": [
+            {
+              "text": "$ python3 run.py --root intro-work apply",
+              "style": "command"
+            },
+            {
+              "text": "",
+              "style": "text"
+            },
+            {
+              "text": "■ intro-demo.md — apply",
+              "style": "text"
+            },
+            {
+              "text": "  탐지 3건",
+              "style": "text"
+            },
+            {
+              "text": "   - 기관: 확실 1 / 추정 0  예: 미******",
+              "style": "text"
+            },
+            {
+              "text": "   - 성명: 확실 2 / 추정 0  예: 홍*동",
+              "style": "text"
+            },
+            {
+              "text": "  게이트: 통과 (재탐지 0, 원값 잔존 0)",
+              "style": "success"
+            },
+            {
+              "text": "  산출: intro-demo.비식별.md",
+              "style": "accent"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "두 번 나온 이름은 같은 가명으로 바뀝니다",
+      "caption": "직함은 남고, 같은 인물은 문서 안에서 계속 같은 가명을 씁니다.",
+      "panels": [
+        {
+          "title": "in/intro-demo.md · 원본",
+          "kind": "file",
+          "lines": [
+            {
+              "text": "# 소개용 가상 문서",
+              "style": "heading"
+            },
+            {
+              "text": "",
+              "style": "text"
+            },
+            {
+              "text": "연구책임자: 홍길동 교수",
+              "style": "highlight"
+            },
+            {
+              "text": "소속: 미래정책연구원",
+              "style": "highlight"
+            },
+            {
+              "text": "",
+              "style": "text"
+            },
+            {
+              "text": "홍길동 교수가 검토함.",
+              "style": "highlight"
+            }
+          ]
+        },
+        {
+          "title": "out/intro-demo.비식별.md · 실제 산출물",
+          "kind": "file",
+          "lines": [
+            {
+              "text": "# 소개용 가상 문서",
+              "style": "heading"
+            },
+            {
+              "text": "",
+              "style": "text"
+            },
+            {
+              "text": "연구책임자: [연구자A] 교수",
+              "style": "accent"
+            },
+            {
+              "text": "소속: [기관A]",
+              "style": "accent"
+            },
+            {
+              "text": "",
+              "style": "text"
+            },
+            {
+              "text": "[연구자A] 교수가 검토함.",
+              "style": "accent"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "비식별본과 원값 매핑은 따로 보관합니다",
+      "caption": "out/의 결과를 직접 확인한 뒤 공유합니다.",
+      "panels": [
+        {
+          "title": "intro-work/ · 실행 후 작업 폴더",
+          "kind": "terminal",
+          "lines": [
+            {
+              "text": "out/",
+              "style": "accent"
+            },
+            {
+              "text": "  intro-demo.비식별.md     게이트를 통과한 결과",
+              "style": "text"
+            },
+            {
+              "text": "",
+              "style": "text"
+            },
+            {
+              "text": "_private/",
+              "style": "accent"
+            },
+            {
+              "text": "  mapping.json            원값 ↔ 가명 매핑",
+              "style": "text"
+            },
+            {
+              "text": "",
+              "style": "text"
+            },
+            {
+              "text": "검증 통과가 모든 민감정보의 제거를 뜻하지는 않습니다.",
+              "style": "muted"
+            },
+            {
+              "text": "다음 행동: README의 가상 문서 예제로 직접 실행",
+              "style": "command"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repo": "deident",
+  "seconds": 30,
+  "scene_times": [
+    0,
+    7,
+    14,
+    23,
+    30
+  ],
+  "brand": "정책한걸음",
+  "source_commit": "accce434199af26de49c9ddf20e0f9c68c01e71f"
 }

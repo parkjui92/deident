@@ -1,0 +1,21 @@
+{
+  "data": "fictional example; person and organization supplied in denylist",
+  "commands": [
+    {
+      "command": "python3 run.py --root intro-work guard",
+      "exit_code": 3,
+      "stdout": "민감정보 사전 점검 (전 과정 로컬 실행 · 원문은 외부로 나가지 않았습니다)\n  ▲ intro-demo.md — 주의 (성명 2, 기관 1)\n\n판정: 주의 — 개인 식별정보가 있습니다. 비식별본으로 작업하기를 권합니다.\n비식별본 만들기:  python3 run.py apply <파일>\n"
+    },
+    {
+      "command": "python3 run.py --root intro-work scan",
+      "exit_code": 0,
+      "stdout": "■ intro-demo.md — scan\n  탐지 3건\n   - 기관: 확실 1 / 추정 0  예: 미******\n   - 성명: 확실 2 / 추정 0  예: 홍*동\n"
+    },
+    {
+      "command": "python3 run.py --root intro-work apply",
+      "exit_code": 0,
+      "stdout": "■ intro-demo.md — apply\n  탐지 3건\n   - 기관: 확실 1 / 추정 0  예: 미******\n   - 성명: 확실 2 / 추정 0  예: 홍*동\n  게이트: 통과 (재탐지 0, 원값 잔존 0)\n  산출: intro-demo.비식별.md\n"
+    }
+  ],
+  "output": "# 소개용 가상 문서\n\n아래 이름과 소속은 비식별화 동작을 설명하기 위한 가상 자료입니다.\n\n연구책임자: [연구자A] 교수\n소속: [기관A]\n\n[연구자A] 교수가 검토함.\n"
+}
