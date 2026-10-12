@@ -25,7 +25,7 @@ from ..extract import hwpx as hwpx_extract
 from ..extract.hwpx import (
     TAG_LINESEG, TAG_P, HwpxDoc, is_body_part, parse_document,
 )
-from ..model import DocumentIssue, Replacement, Segment
+from ..model import KIND_HIDDEN, DocumentIssue, Replacement, Segment
 from .planner import apply_to_text
 from .sweep import sweep_attributes
 from .xml_apply import apply_to_segments
@@ -373,7 +373,7 @@ def build_markdown(segments: list[Segment],
         table_id = None
 
     for seg in segments:
-        if not is_body_part(seg.part):
+        if not is_body_part(seg.part) or seg.kind == KIND_HIDDEN:
             continue
         text = seg.text
         seg_plans = plans.get(seg.seg_id)

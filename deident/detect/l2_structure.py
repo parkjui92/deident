@@ -28,6 +28,9 @@ RE_LABEL = re.compile(
 
 MAX_NAME_LEN = 5
 MIN_ORG_LEN = 3
+# 성명 칸의 로마자 이름 ('Nguyen Thi Lan', 'Céline Rochat') — 낱말 둘에서 넷
+RE_LATIN_NAME = re.compile(
+    r"[A-Za-zÀ-ÖØ-öø-ɏ][A-Za-zÀ-ÖØ-öø-ɏ.'\-]*(?: [A-Za-zÀ-ÖØ-öø-ɏ][A-Za-zÀ-ÖØ-öø-ɏ.'\-]*){1,3}")
 
 
 def _clean_header(text: str) -> str:
@@ -57,6 +60,8 @@ def header_category(seg: Segment) -> str | None:
 
 
 def _looks_like_name(value: str) -> bool:
+    if RE_LATIN_NAME.fullmatch(value):
+        return True
     if not 2 <= len(value) <= MAX_NAME_LEN:
         return False
     return all("가" <= ch <= "힣" for ch in value)
@@ -94,6 +99,9 @@ def harvest(segments: list[Segment], config: Config) -> Registry:
         attributes.pop(category, None)
 
         if category == CAT_PERSON:
+            if RE_LATIN_NAME.fullmatch(value):
+                registry.add(value, CAT_PERSON, attributes)
+                continue
             # 한 칸에 '홍길동(책임)' 처럼 붙어 오는 경우가 흔하다
             for name in re.findall(r"[가-힣]{2,5}", value):
                 if _looks_like_name(name):

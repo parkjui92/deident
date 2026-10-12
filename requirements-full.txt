@@ -1,0 +1,5 @@
+-r requirements.txt
+kiwipiepy==0.23.2
+PyMuPDF==1.27.2.3
+openpyxl==3.1.5
+olefile==0.47

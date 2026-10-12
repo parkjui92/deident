@@ -32,6 +32,7 @@ from lxml import etree
 
 from ..apply.xml_apply import XmlPart, build_segment
 from ..errors import DocumentRejected
+from . import embedded, hidden
 from ..model import (
     KIND_CELL, KIND_FOOTER, KIND_FOOTNOTE, KIND_HEADER, KIND_PARA, KIND_TEXTBOX,
     Segment, TableCtx,
@@ -395,6 +396,17 @@ def load_parts(zf: zipfile.ZipFile) -> list[XmlPart]:
         builder.walk(tree.getroot())
         order = builder.order
         parts.append(XmlPart(name=name, tree=tree, segments=builder.segments))
+
+    # 본문 밖에 사는 글자 — 책갈피·대체 텍스트·도구 설명 같은 속성과, 문서 속성·
+    # 문서 변수·차트·customXml·바깥 링크 주소 같은 곁가지 멤버
+    by_name = {part.name: part for part in parts}
+    side_trees, side_segments = hidden.collect(
+        zf, {part.name: part.tree for part in parts}, order_start=order)
+    for name, tree in side_trees.items():
+        by_name[name] = XmlPart(name=name, tree=tree)
+        parts.append(by_name[name])
+    for seg in side_segments:
+        by_name[seg.part].segments.append(seg)
     return parts
 
 
@@ -414,7 +426,9 @@ def open_package(path: Path) -> zipfile.ZipFile:
 def extract(path: Path) -> list[Segment]:
     with open_package(path) as zf:
         parts = load_parts(zf)
-    return [seg for part in parts for seg in part.segments]
+        segments = [seg for part in parts for seg in part.segments]
+        segments.extend(embedded.extract(zf, order_start=len(segments)))
+    return segments
 
 
 def revision_parts(parts: list[XmlPart]) -> list[str]:

@@ -16,9 +16,11 @@ from pathlib import Path
 
 from lxml import etree
 
+from ..extract import embedded, hidden
 from ..model import (
-    KIND_CAPTION, KIND_PARA, DocumentIssue, Replacement, Segment,
+    KIND_CAPTION, KIND_HIDDEN, KIND_PARA, DocumentIssue, Replacement, Segment,
 )
+from . import ooxml
 from .planner import apply_to_text
 from .sweep import sweep_attributes
 from .xml_apply import apply_to_segments, build_segment
@@ -27,9 +29,6 @@ NS_DRAWING = "http://schemas.openxmlformats.org/drawingml/2006/main"
 P_TAG = f"{{{NS_DRAWING}}}p"
 BREAK_TAGS = {f"{{{NS_DRAWING}}}br"}
 FIELD_TAG = f"{{{NS_DRAWING}}}fld"
-
-META_MEMBERS = ("docProps/core.xml", "docProps/app.xml", "docProps/custom.xml")
-STRIP_META = {"creator", "lastModifiedBy", "Manager", "Company", "Template"}
 
 
 def _members(zf: zipfile.ZipFile) -> list[str]:
@@ -50,7 +49,8 @@ def _pseudo(element: etree._Element) -> str | None:
     return "\n" if element.tag in BREAK_TAGS else None
 
 
-def parse(path: Path) -> tuple[dict[str, etree._ElementTree], list[Segment]]:
+def parse(path: Path) -> tuple[dict[str, etree._ElementTree], list[Segment], set[str]]:
+    """(수정 대상 XML 트리, 세그먼트, 늘 다시 쓰는 멤버)."""
     trees: dict[str, etree._ElementTree] = {}
     segments: list[Segment] = []
     order = 0
@@ -72,30 +72,18 @@ def parse(path: Path) -> tuple[dict[str, etree._ElementTree], list[Segment]]:
                     segments.append(seg)
                     order += 1
 
-    return trees, segments
+        # 슬라이드 밖에 사는 글자 — 차트·스마트아트·메모·문서 속성·도형 이름·링크 주소
+        always = set(trees)
+        side_trees, side_segments = hidden.collect(zf, trees, order_start=order)
+        trees.update(side_trees)
+        segments.extend(side_segments)
+        segments.extend(embedded.extract(zf, order_start=order + len(side_segments)))
+
+    return trees, segments, always
 
 
 def extract(path: Path) -> list[Segment]:
     return parse(path)[1]
-
-
-def _clean_metadata(source: Path) -> dict[str, bytes]:
-    cleaned: dict[str, bytes] = {}
-    with zipfile.ZipFile(source) as zf:
-        names = zf.namelist()
-        for member in META_MEMBERS:
-            if member not in names:
-                continue
-            root = etree.fromstring(zf.read(member))
-            changed = False
-            for node in root.iter():
-                if etree.QName(node).localname in STRIP_META and (node.text or "").strip():
-                    node.text = ""
-                    changed = True
-            if changed:
-                cleaned[member] = etree.tostring(root, xml_declaration=True,
-                                                 encoding="UTF-8", standalone=True)
-    return cleaned
 
 
 class PptxHandler:
@@ -111,6 +99,8 @@ class PptxHandler:
         lines: list[str] = []
         current = ""
         for seg in segments:
+            if seg.kind == KIND_HIDDEN:
+                continue
             if seg.part != current:
                 lines.append(f"\n## {Path(seg.part).stem}\n")
                 current = seg.part
@@ -124,35 +114,29 @@ class PptxHandler:
     def apply(self, path: Path, out_path: Path,
               plans: dict[str, list[Replacement]],
               segments: list[Segment], mapping=None) -> list[DocumentIssue]:
-        trees, fresh = parse(path)
-        apply_to_segments(fresh, plans)
+        trees, fresh, always = parse(path)
+        _, touched = apply_to_segments(fresh, plans)
 
         # 도형 이름·대체 텍스트에 본문이 복사돼 들어가는 일이 있다 (화면에 안 보인다)
+        swept: set[str] = set()
         if mapping is not None:
-            for tree in trees.values():
-                sweep_attributes(tree.getroot(), mapping)
+            for name, tree in trees.items():
+                if sweep_attributes(tree.getroot(), mapping):
+                    swept.add(name)
 
-        replaced = {
-            name: etree.tostring(tree, xml_declaration=True,
-                                 encoding=tree.docinfo.encoding or "UTF-8",
-                                 standalone=tree.docinfo.standalone)
-            for name, tree in trees.items()
-        }
-        replaced.update(_clean_metadata(path))
+        with zipfile.ZipFile(path) as zf:
+            dirty = always | swept | hidden.touched_parts(fresh, touched)
+            dirty |= ooxml.clear_identity(zf, trees)
+            replaced = {name: ooxml.serialize(tree) for name, tree in trees.items()
+                        if name in dirty}
+            inner, issues = embedded.apply(zf, plans, mapping)
+            replaced.update(inner)
 
-        with zipfile.ZipFile(path) as src, zipfile.ZipFile(
-                out_path, "w", zipfile.ZIP_DEFLATED) as dst:
-            for info in src.infolist():
-                data = replaced.get(info.filename)
-                if data is None:
-                    data = src.read(info)
-                new_info = zipfile.ZipInfo(info.filename, date_time=info.date_time)
-                new_info.compress_type = info.compress_type
-                new_info.external_attr = info.external_attr
-                dst.writestr(new_info, data)
+        ooxml.rewrite_zip(path, out_path, replaced)
 
-        return [DocumentIssue(
+        issues.append(DocumentIssue(
             level="warn", code="pptx-images",
             message="발표자료의 그림·캡처(조직도·명함 사진 등) 속 글자는 읽지 못합니다. "
                     "슬라이드를 눈으로 확인하십시오.",
-            where=path.name)]
+            where=path.name))
+        return issues

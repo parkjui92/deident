@@ -1,6 +1,6 @@
 """탐지 결과 병합 — 중복·중첩 해소와 allowlist 필터.
 
-우선순위: rule(사용자 지정) > L1(구조적) > L2(표 수확·전파) > L3(형태소 추정).
+우선순위: rule(사용자 지정) > L1(구조적) > L2(표 수확·전파) > L3(형태소 추정) > L4(LLM 제안).
 같은 구간을 여러 탐지기가 잡으면 detectors 를 합산해 리포트에 신뢰도로 보여준다.
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 from ..config import Config
 from ..model import RE_PSEUDONYM, Finding, GRADE_CERTAIN, normalize_key
 
-DETECTOR_RANK = {"rule": 0, "L1": 1, "L2": 2, "L3": 3}
+DETECTOR_RANK = {"rule": 0, "L1": 1, "L2": 2, "L3": 3, "L4": 4}
 
 
 def _rank(finding: Finding) -> int:
