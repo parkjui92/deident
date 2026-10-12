@@ -31,6 +31,7 @@ from ..model import (
     KIND_CAPTION, KIND_CELL, KIND_FOOTER, KIND_FOOTNOTE, KIND_HEADER, KIND_META,
     KIND_PARA, KIND_TEXTBOX, Piece, Segment, TableCtx,
 )
+from . import hidden
 
 # ── 네임스페이스 ────────────────────────────────────────────────────────────
 NS = {
@@ -410,6 +411,18 @@ def parse_document(path: Path) -> HwpxDoc:
     pkg = load_package(path)
     parts, part_order, errors = parse_parts(pkg)
     segments, container, part_of = build_segments(parts, part_order)
+
+    # 글자 노드는 위에서 전부 덮었다. 남는 것은 속성값이다 — 책갈피 이름, 누름틀 이름,
+    # 양식 목록 항목, 문서 정보(content="…"). 서식 정의(header.xml)는 글꼴·스타일
+    # 이름뿐이라 보지 않는다.
+    collector = hidden.Collector(order_start=len(segments))
+    for member in part_order:
+        if is_body_part(member) or member.lower().endswith(".hpf"):
+            collector.attributes(parts[member].tree.getroot(), member)
+    for seg in collector.segments:
+        segments.append(seg)
+        container[seg.seg_id] = seg.pieces[0].node
+        part_of[seg.seg_id] = seg.part
     return HwpxDoc(package=pkg, parts=parts, part_order=part_order, segments=segments,
                    container=container, part_of=part_of, parse_errors=errors)
 

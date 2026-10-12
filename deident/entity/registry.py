@@ -102,7 +102,7 @@ def generate_variants(value: str, category: str) -> set[str]:
     # 찾아내고(뒤따르는 직함은 match_is_whole 이 경계로 인정한다), 변형으로
     # 등록하면 '박슬기 책임연구원' 전체가 통째로 치환돼 문장이 무너진다.
     # 마스킹 표기 (홍*동, 홍○동)
-    if len(value) >= 3:
+    if len(value) >= 3 and all("가" <= ch <= "힣" for ch in value):
         for filler in ("*", "○", "O", "●"):
             variants.add(value[0] + filler * (len(value) - 2) + value[-1])
     return {v for v in variants if len(v) >= 2}

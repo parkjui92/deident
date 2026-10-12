@@ -15,10 +15,11 @@ from .mask import mask_value
 
 
 def build_summary(source: Path, findings: list[Finding], outputs: list[Path],
-                  gate: GateResult | None, mode: str) -> dict:
+                  gate: GateResult | None, mode: str,
+                  issues: list | None = None) -> dict:
     counts: dict[str, dict[str, int]] = {}
     for f in findings:
-        bucket = counts.setdefault(f.category, {"확실": 0, "추정": 0})
+        bucket = counts.setdefault(f.category, {"확실": 0, "추정": 0, "검토": 0})
         bucket[f.grade] = bucket.get(f.grade, 0) + 1
 
     samples: dict[str, list[str]] = {}
@@ -36,6 +37,7 @@ def build_summary(source: Path, findings: list[Finding], outputs: list[Path],
         "카테고리별": {
             CATEGORY_LABEL.get(cat, cat): {
                 "확실": v.get("확실", 0), "추정": v.get("추정", 0),
+                **({"검토": v["검토"]} if v.get("검토") else {}),
                 "예시(마스킹)": samples.get(cat, []),
             }
             for cat, v in sorted(counts.items())
@@ -52,6 +54,8 @@ def build_summary(source: Path, findings: list[Finding], outputs: list[Path],
             "격리": gate.quarantined.name if gate.quarantined else None,
         }
         data["주의"] = [f"[{i.level}] {i.code}: {i.message}" for i in gate.issues]
+    elif issues:
+        data["주의"] = [f"[{i.level}] {i.code}: {i.message}" for i in issues]
 
     return data
 
@@ -67,6 +71,8 @@ def render_text(data: dict) -> str:
     for label, info in data.get("카테고리별", {}).items():
         example = ", ".join(info.get("예시(마스킹)", []))
         detail = f"확실 {info['확실']} / 추정 {info['추정']}"
+        if info.get("검토"):
+            detail += f" / 검토 {info['검토']} (치환 안 함)"
         lines.append(f"   - {label}: {detail}" + (f"  예: {example}" if example else ""))
     gate = data.get("게이트")
     if gate:

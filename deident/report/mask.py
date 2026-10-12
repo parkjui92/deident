@@ -39,9 +39,11 @@ def mask_value(value: str, category: str) -> str:
 
     if category in (CAT_PHONE, CAT_TEL):
         digits = "".join(ch for ch in value if ch.isdigit())
-        if len(digits) >= 4:
+        if len(digits) >= 8:
             return MASK * (len(digits) - 4) + digits[-4:]
-        return MASK * len(digits)
+        # 내선 번호(네 자리)는 끝 네 자리가 곧 전부이고, 한글로 풀어 쓴 번호
+        # ('공일공-…')에는 숫자가 없다 — 통째로 가린다
+        return MASK * max(len(digits), len(value) if not digits else 0, 1)
 
     if category == CAT_EMAIL and "@" in value:
         local, _, domain = value.partition("@")
@@ -58,8 +60,12 @@ def mask_value(value: str, category: str) -> str:
         return MASK * max(0, len(digits) - 3) + digits[-3:]
 
     if category == CAT_ADDRESS:
-        head = value.split()[0] if value.split() else value[:2]
-        return f"{head} " + MASK * 6
+        # 첫 마디가 시·도일 때만 그대로 보인다. 아파트 이름·건물 호실처럼 한 마디가
+        # 곧 식별 단서인 주소는 첫 글자만 남긴다.
+        parts = value.split()
+        if len(parts) >= 2 and parts[0].endswith(("시", "도")):
+            return f"{parts[0]} " + MASK * 6
+        return _keep_edges(value, 1, 0)
 
     return _keep_edges(value, 1, 0)
 

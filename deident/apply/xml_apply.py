@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Callable, Iterator
 
@@ -47,15 +48,51 @@ def iter_text_slots(element: etree._Element,
             yield child, "tail"
 
 
+ATTR_SLOT = "attr:"
+
+
 def get_slot(node: etree._Element, slot: str) -> str:
+    if slot.startswith(ATTR_SLOT):
+        return node.get(slot[len(ATTR_SLOT):]) or ""
     return (node.text if slot == "text" else node.tail) or ""
 
 
 def set_slot(node: etree._Element, slot: str, value: str) -> None:
-    if slot == "text":
+    if slot.startswith(ATTR_SLOT):
+        node.set(slot[len(ATTR_SLOT):], value)
+    elif slot == "text":
         node.text = value
     else:
         node.tail = value
+
+
+# 이름이 곧 참조 대상인 자리. 시트 이름·정의된 이름·책갈피는 다른 곳(수식·필드)에서
+# 그 이름으로 불린다. 가명의 대괄호는 엑셀에서 '외부 통합 문서' 표기와 겹쳐 파일이
+# 깨지므로, 이런 자리에서는 글자·숫자만 남긴 형태를 쓴다 ([연구자A] → 연구자A).
+# 부르는 쪽(수식·필드 지시문)도 같은 형태를 써야 참조가 끊기지 않는다.
+IDENT_TEXT = frozenset({"f", "definedName", "formula1", "formula2", "instrText"})
+IDENT_ATTR = frozenset({
+    ("sheet", "name"), ("definedName", "name"), ("bookmarkStart", "name"),
+    ("hyperlink", "anchor"), ("hyperlink", "location"), ("fldSimple", "instr"),
+})
+RE_IDENT_UNSAFE = re.compile(r"[^0-9A-Za-z가-힣_]")
+
+
+def _local(name: str) -> str:
+    return name.rsplit("}", 1)[-1]
+
+
+def is_identifier_slot(node, slot: str) -> bool:
+    tag = getattr(node, "tag", None)
+    if not isinstance(tag, str):
+        return False
+    if slot.startswith(ATTR_SLOT):
+        return (_local(tag), _local(slot[len(ATTR_SLOT):])) in IDENT_ATTR
+    return slot == "text" and _local(tag) in IDENT_TEXT
+
+
+def ident_safe(pseudonym: str) -> str:
+    return RE_IDENT_UNSAFE.sub("", pseudonym) or "가명"
 
 
 def build_segment(seg_id: str, root: etree._Element, *,
@@ -134,6 +171,8 @@ def apply_to_segment(seg: Segment, plans: list[Replacement]) -> int:
             node_of[key] = piece.node
             # 대체 문자열은 첫 조각에만 넣고, 나머지 조각에서는 걸린 부분을 지운다
             text = plan.replacement if idx == 0 else ""
+            if text and is_identifier_slot(piece.node, piece.slot):
+                text = ident_safe(text)
             edits.setdefault(key, []).append(_Edit(local_start, local_end, text))
         applied += 1
 

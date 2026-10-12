@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import inspect
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol
@@ -14,10 +15,10 @@ from typing import Callable, Protocol
 from .apply.planner import apply_to_text, group_by_segment, plan_replacements
 from .apply.sweep import sweep, sweep_text
 from .config import Config
-from .detect import l1_patterns, l2_structure, l3_ner, merge, rules
+from .detect import l1_patterns, l2_structure, l3_ner, l4_llm, merge, rules
 from .entity.pseudonym import Mapping
 from .errors import UnsupportedFormat
-from .model import DocumentIssue, Finding, Replacement, Segment
+from .model import KIND_HIDDEN, DocumentIssue, Finding, Replacement, Segment
 from .verify import context_risk
 from .verify.gate import GateResult, run_gate
 
@@ -97,6 +98,8 @@ class RunResult:
     issues: list[DocumentIssue] = field(default_factory=list)
 
     blocked: bool = False
+    # 로컬 LLM이 짚은 식별 서술 (원문) — 비공개 리포트에만 싣는다
+    llm_quasi: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -105,11 +108,30 @@ class RunResult:
         return self.gate is None or self.gate.passed
 
 
-def scan_file(path: Path, config: Config, mapping: Mapping) -> RunResult:
+def _with_llm(result: RunResult, config: Config,
+              llm: "l4_llm.LLMSettings | None") -> None:
+    """선택 기능 — 규칙이 잡은 것에 로컬 LLM 후보를 보탠다.
+
+    여기서만 부른다. 검증 게이트의 재스캔은 detect() 를 거치므로 LLM을 쓰지 않는다.
+    """
+    if llm is None:
+        return
+    outcome = l4_llm.detect(result.segments, config, result.findings, llm)
+    result.findings = sorted(result.findings + outcome.findings,
+                             key=lambda f: (f.part, f.seg_id, f.start))
+    result.issues.extend(outcome.issues)
+    result.llm_quasi = list(outcome.quasi or [])
+
+
+def scan_file(path: Path, config: Config, mapping: Mapping,
+              llm: "l4_llm.LLMSettings | None" = None) -> RunResult:
     handler = handler_for(path)
     segments = handler.extract(path)
     findings = detect(segments, config, mapping)
-    return RunResult(source=path, segments=segments, findings=findings)
+    result = RunResult(source=path, segments=segments, findings=findings)
+    _with_llm(result, config, llm)
+    result.blocked = any(i.level == "block" for i in result.issues)
+    return result
 
 
 def _markdown_output(handler: FormatHandler, path: Path, segments: list[Segment],
@@ -135,6 +157,8 @@ def _markdown_output(handler: FormatHandler, path: Path, segments: list[Segment]
         row_key = None
 
     for seg in segments:
+        if seg.kind == KIND_HIDDEN:
+            continue      # 속성·문서 속성 같은 숨은 자리는 읽을 본문이 아니다
         text = seg.text
         seg_plans = plans.get(seg.seg_id)
         if seg_plans:
@@ -172,14 +196,37 @@ def _call_apply(handler: FormatHandler, path: Path, out_path: Path,
 
 def apply_file(path: Path, config: Config, mapping: Mapping, *,
                strict_only: bool = False, mask_mode: bool = False,
-               emit_markdown: bool = True) -> RunResult:
-    """탐지 → 치환 → 위생 → 게이트. 게이트 통과분만 out/ 에 남는다."""
+               emit_markdown: bool = True,
+               llm: "l4_llm.LLMSettings | None" = None) -> RunResult:
+    """검증 전 파일은 비공개 임시 폴더에 둔다. 예외 발생 시에도 out/은 깨끗하다."""
+    ws = config.workspace
+    ws.prepare()
+    with tempfile.TemporaryDirectory(prefix="staging-", dir=ws.private) as tmp:
+        result = _apply_file(path, config, mapping, Path(tmp), strict_only=strict_only,
+                             mask_mode=mask_mode, emit_markdown=emit_markdown, llm=llm)
+        if result.ok:
+            published = []
+            for output in result.outputs:
+                target = ws.out / output.name
+                output.replace(target)
+                published.append(target)
+            result.outputs = published
+        return result
+
+
+def _apply_file(path: Path, config: Config, mapping: Mapping, staging_dir: Path, *,
+                strict_only: bool, mask_mode: bool, emit_markdown: bool,
+                llm: "l4_llm.LLMSettings | None") -> RunResult:
+    """탐지 → 치환 → 위생 → 게이트. 모든 산출물이 통과해야 반환한다."""
     ws = config.workspace
     ws.prepare()
 
     handler = handler_for(path)
     segments = handler.extract(path)
     findings = detect(segments, config, mapping)
+    result = RunResult(source=path, segments=segments, findings=findings)
+    _with_llm(result, config, llm)
+    findings = result.findings
 
     seg_index = {s.seg_id: s for s in segments}
     plans = plan_replacements(findings, seg_index, mapping, config,
@@ -189,7 +236,6 @@ def apply_file(path: Path, config: Config, mapping: Mapping, *,
         plans.extend(sweep(segments, mapping, config, plans))
     grouped = group_by_segment(plans)
 
-    result = RunResult(source=path, segments=segments, findings=findings)
     staged: list[Path] = []
 
     # 안전을 보장할 수 없는 문서(변경 추적이 켜진 워드 등)는 여기서 멈춘다.
@@ -204,12 +250,16 @@ def apply_file(path: Path, config: Config, mapping: Mapping, *,
         return result
 
     if handler.preserves_layout:
-        out_path = ws.out / f"{path.stem}.비식별{path.suffix}"
+        out_path = staging_dir / f"{path.stem}.비식별{path.suffix}"
         result.issues.extend(
             _call_apply(handler, path, out_path, grouped, segments, mapping))
+        if not out_path.is_file():
+            result.issues.append(DocumentIssue(
+                level="block", code="output-missing",
+                message="서식 보존 산출물을 만들지 못해 이 문서의 공유용 파일 생성을 중단했습니다."))
         staged.append(out_path)
 
-    md_path = ws.out / f"{path.stem}.비식별.md"
+    md_path = staging_dir / f"{path.stem}.비식별.md"
     # 원본이 이미 텍스트면 서식 보존본이 곧 마크다운본이다 — 같은 파일을 두 번 쓰지 않는다
     if emit_markdown and md_path not in staged:
         rendered = _markdown_output(handler, path, segments, grouped)

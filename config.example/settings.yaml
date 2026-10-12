@@ -14,6 +14,7 @@ categories:
   address: true
   birth: true
   vehicle: true
+  handle: true            # 메신저·서비스 계정, 사번·학번
   # 소속·기관
   org: true               # 기관명
   dept: true              # 부서·조직
@@ -34,3 +35,14 @@ mask_char: "●"
 
 # 가명 서식 — {label} 은 구분 이름, {tag} 는 일련 표시
 pseudonym_format: "[{label}{tag}]"
+
+# 로컬 LLM (선택). apply·scan 에 --llm 을 달았을 때만 쓴다.
+# 규칙이 못 잡는 것(접미사 없는 회사 이름, 단서 없는 본문 이름)을 이 컴퓨터의
+# 모델에 묻는다. 주소는 이 컴퓨터(127.0.0.1·localhost)만 허용한다 — 다른 주소를
+# 적으면 원문이 밖으로 나가므로 실행을 거부한다.
+llm:
+  model: "gemma3:12b"                 # ollama 에 받아 둔 모델 이름
+  endpoint: "http://127.0.0.1:11434"
+  chunk_chars: 500                    # 길게 넣으면 재현율이 떨어진다(실측)
+  timeout: 180
+  replace_orgs: false                 # true 면 LLM이 찾은 기관도 치환 (--llm-orgs 와 같다)

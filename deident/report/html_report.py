@@ -49,6 +49,7 @@ mark { background:rgba(198,40,40,.18); color:inherit; border-bottom:2px solid va
 mark.likely { background:rgba(239,108,0,.16); border-bottom-color:var(--likely); }
 .g-확실 { color:var(--certain); font-weight:600; }
 .g-추정 { color:var(--likely); font-weight:600; }
+.g-검토 { color:var(--muted); font-weight:600; }
 .note { background:var(--chip); border-left:3px solid var(--muted); padding:.8rem 1rem;
   border-radius:0 6px 6px 0; margin:1rem 0; font-size:.9rem; }
 .fail { border-left-color:var(--certain); }
@@ -204,9 +205,15 @@ def write_reports(result, config: Config, mapping: Mapping) -> tuple[Path, Path]
                       f":{html.escape(seg_id)}</span><br>"
                       f"{_highlight_segment(seg, group)}</div>")
 
+    quasi = getattr(result, "llm_quasi", [])
+    quasi_block = ""
+    if quasi:
+        quasi_block = ("<h2>이름 없이도 사람을 좁힐 수 있는 서술 (LLM 제안 · 치환 안 함)</h2><ul>"
+                       + "".join(f"<li>{html.escape(q)}</li>" for q in quasi) + "</ul>")
+
     full_body = (cards + "<h2>원문 대조 (탐지 구간 표시)</h2>"
                  + ("".join(blocks) or "<p>탐지된 항목이 없습니다.</p>")
-                 + _issue_block(result) + guide)
+                 + quasi_block + _issue_block(result) + guide)
     private_path = ws.private / f"{result.source.stem}.report_full.html"
     private_path.write_text(
         _shell(f"원문 대조 리포트 — {result.source.stem}", source, full_body,

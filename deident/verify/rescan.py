@@ -11,14 +11,16 @@
 
 from __future__ import annotations
 
+import html
 import re
 from pathlib import Path
 
 from ..config import Config
 from ..detect import l1_patterns, merge, rules
 from ..entity.pseudonym import Mapping
+from ..extract.hidden import has_content
 from ..model import KIND_LINE, Finding, Piece, Segment
-from .exhaustive import RE_TAG, iter_parts
+from .exhaustive import MAX_ATTR_FOR_DIGITS, RE_TAG, attribute_values, iter_parts
 
 # 추출기가 이미 제대로 훑는 부분 — 원시 훑기에서 중복으로 볼 필요가 없다
 MODELED_HINTS = ("section", "document.xml", "header", "footer", "footnote", "endnote")
@@ -27,13 +29,15 @@ MIN_CHUNK = 4
 
 
 def output_segments(path: Path) -> list[Segment]:
-    """산출물을 원본과 같은 추출기로 연다. 실패하면 빈 목록 — 원시 훑기가 받는다."""
+    """산출물을 원본과 같은 추출기로 연다. 읽기 실패를 탐지 0건으로 바꾸지 않는다."""
     from .. import pipeline   # 순환 참조를 피해 늦게 들여온다
+    from ..errors import DocumentRejected
 
     try:
         return pipeline.handler_for(path).extract(path)
-    except Exception:
-        return []
+    except Exception as exc:
+        raise DocumentRejected(
+            f"산출물을 읽지 못해 검사를 완료하지 못했습니다 ({type(exc).__name__}).") from None
 
 
 def _structured(path: Path, config: Config,
@@ -53,7 +57,15 @@ def _raw_chunks(path: Path) -> list[Segment]:
     for part in iter_parts(path):
         if not part.is_text or not part.text:
             continue
-        pieces = RE_TAG.split(part.text) if "<" in part.text else part.text.split("\n")
+        if part.plain or "<" not in part.text:
+            pieces = part.text.split("\n")
+        else:
+            pieces = [html.unescape(c) for c in RE_TAG.split(part.text)]
+            # 속성값도 본다. 다만 좌표·식별자·서식값이 대부분이라, 사람·번호가 들어
+            # 있을 만한 값만 추린다 (전부 넣으면 좌표가 전화번호로 읽힌다).
+            pieces.extend(v for v in attribute_values(part.text)
+                          if len(v) <= MAX_ATTR_FOR_DIGITS
+                          and has_content(v, long_digits=False))
         for chunk in pieces:
             chunk = chunk.strip()
             if len(chunk) < MIN_CHUNK:

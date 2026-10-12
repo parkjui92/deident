@@ -10,7 +10,7 @@ from __future__ import annotations
 from ..config import Config
 from ..entity.pseudonym import Mapping
 from ..model import (
-    GRADE_CERTAIN, Finding, Replacement, Segment,
+    GRADE_CERTAIN, GRADE_REVIEW, Finding, Replacement, Segment,
 )
 
 
@@ -19,6 +19,8 @@ def plan_replacements(findings: list[Finding], segments: dict[str, Segment],
                       strict_only: bool = False, mask_mode: bool = False) -> list[Replacement]:
     plans: list[Replacement] = []
     for f in findings:
+        if f.grade == GRADE_REVIEW:
+            continue   # 보여 주기만 하는 후보
         if strict_only and f.grade != GRADE_CERTAIN:
             continue
         if not strict_only and not config.replace_likely and f.grade != GRADE_CERTAIN:
